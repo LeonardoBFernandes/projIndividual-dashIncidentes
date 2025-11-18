@@ -9,7 +9,6 @@ import kong.unirest.Unirest;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 public class JiraCrawler {
     //Query usando affected hardware: "project = MONA AND \"Affected hardware\" ~ \"Nome do componente\""
@@ -59,47 +58,63 @@ public class JiraCrawler {
         return response.getBody().getObject().getInt("count");
     }
 
-    public static ObjectNode buscarDadosKpisIncidentes() {
+    public static List buscarDadosKpisIncidentes() {
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode dadosKpisIncidentes = mapper.createObjectNode();
-        dadosKpisIncidentes.put("totais", fazerConsultaContador("project = MONA"));
-        dadosKpisIncidentes.put("abertos", fazerConsultaContador("project = MONA AND status in (open, 'in progress')"));
-        dadosKpisIncidentes.put("fechados", fazerConsultaContador("project = MONA AND status in (completed, canceled, closed)"));
-        dadosKpisIncidentes.put("atencao", fazerConsultaContador("project = MONA AND summary ~ 'ATENÇÃO'"));
-        dadosKpisIncidentes.put("criticos", fazerConsultaContador("project = MONA AND summary ~ 'ALERTA CRÍTICO'"));
-        return dadosKpisIncidentes;
+        List<ObjectNode> listaParaEnvio = new ArrayList<>();
+        dadosKpisIncidentes.put("totais", fazerConsultaContador("project = MONA AND created <= \"30d\""));
+        dadosKpisIncidentes.put("abertos", fazerConsultaContador("project = MONA AND status in (open, 'in progress') AND created <= \"30d\""));
+        dadosKpisIncidentes.put("fechados", fazerConsultaContador("project = MONA AND status in (completed, canceled, closed) AND created <= \"30d\""));
+        dadosKpisIncidentes.put("atencao", fazerConsultaContador("project = MONA AND summary ~ 'ATENÇÃO' AND created <= \"30d\""));
+        dadosKpisIncidentes.put("criticos", fazerConsultaContador("project = MONA AND summary ~ 'ALERTA CRÍTICO' AND created <= \"30d\""));
+        listaParaEnvio.add(dadosKpisIncidentes);
+        return listaParaEnvio;
     }
 
-    public static List buscarDadosRankingComponentes() throws JsonProcessingException {
+    public static List<ObjectNode> buscarDadosRankingComponentes() throws JsonProcessingException {
         ObjectMapper mapper = new ObjectMapper();
         List<ObjectNode> dadosRankingComponentes = new ArrayList<>();
         String[] componentes = {"CPU", "Memória RAM", "Disco", "Latência", "Uso de Rede"};
+
+        // Monta a lista de ObjectNode
         for (String componente : componentes) {
             ObjectNode dadosComponente = mapper.createObjectNode();
             dadosComponente.put("nomeComponente", componente);
-            dadosComponente.put("totais", fazerConsultaContador("project = MONA AND \"Affected hardware\" ~ '"+componente+"'"));
-            dadosComponente.put("atencao", fazerConsultaContador("project = MONA AND summary ~ 'ATENÇÃO' AND \"Affected hardware\" ~ '"+componente+"'"));
-            dadosComponente.put("criticos", fazerConsultaContador("project = MONA AND summary ~ 'ALERTA CRÍTICO' AND \"Affected hardware\" ~ '"+componente+"'"));
+            dadosComponente.put("totais", fazerConsultaContador("project = MONA AND \"Affected hardware\" ~ '" + componente + "' AND created <= \"30d\""));
+            dadosComponente.put("atencao", fazerConsultaContador("project = MONA AND summary ~ 'ATENÇÃO' AND \"Affected hardware\" ~ '" + componente + "' AND created <= \"30d\""));
+            dadosComponente.put("criticos", fazerConsultaContador("project = MONA AND summary ~ 'ALERTA CRÍTICO' AND \"Affected hardware\" ~ '" + componente + "' AND created <= \"30d\""));
             dadosRankingComponentes.add(dadosComponente);
         }
 
-        //Fazendo ordenação da lista de jsons
-        //Primeiro é necessário transformar a lista em String
-        String listaAsString = mapper.writeValueAsString(dadosRankingComponentes);
-        //Aqui está sendo feito o mapeamento do json para list
-        List<Map<String, Object>> listaFinalOrdenada = mapper.readValue(listaAsString, List.class);
-        //Aqui é feita a comparação dos valores
-        listaFinalOrdenada.sort((jsonA, jsonB) -> {
-            // Acessa o valor da chave de ordenação em cada Map (JSON)
-            // Assumimos que o valor é um Integer e fazemos o cast.
-            Integer valorA = (Integer) jsonA.get("totais");
-            Integer valorB = (Integer) jsonB.get("totais");
-
-            // Compara os valores (retorna a ordem crescente por padrão)
-            // Colocando primeiro valorB e depois valorA é retornado ordem decrescente
-            return valorB.compareTo(valorA);
+        // Ordena diretamento a lista de ObjectNode
+        dadosRankingComponentes.sort((jsonA, jsonB) -> {
+            int valorA = jsonA.get("totais").asInt();
+            int valorB = jsonB.get("totais").asInt();
+            return Integer.compare(valorB, valorA); // ordem decrescente
         });
 
-        return listaFinalOrdenada;
+        // Agora encontra o(s) componente(s) com mais incidentes
+        List<String> componentesComMaisIncidentes = new ArrayList<>();
+        int maiorNumeroIncidentesTotais = 0;
+
+        if (!dadosRankingComponentes.isEmpty()) {
+            maiorNumeroIncidentesTotais = dadosRankingComponentes.get(0).get("totais").asInt();
+        }
+
+        for (ObjectNode json : dadosRankingComponentes) {
+            int totais = json.get("totais").asInt();
+            if (totais == maiorNumeroIncidentesTotais) {
+                componentesComMaisIncidentes.add(json.get("nomeComponente").asText());
+            } else {
+                break;
+            }
+        }
+
+        // Adiciona o item final à lista
+        ObjectNode resumo = mapper.createObjectNode();
+        resumo.put("componentesComMaisIncidentes", String.join(", ", componentesComMaisIncidentes));
+        dadosRankingComponentes.add(resumo);
+
+        return dadosRankingComponentes;
     }
 }
