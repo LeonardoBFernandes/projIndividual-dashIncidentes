@@ -1,5 +1,6 @@
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import kong.unirest.HttpResponse;
@@ -15,6 +16,49 @@ public class JiraCrawler {
     public static void main(String[] args) throws JsonProcessingException {
         System.out.println(buscarDadosKpisIncidentes());
         System.out.println(buscarDadosRankingComponentes());
+        buscarDadosIncidentes("project = MONA AND created <= 30d ORDER BY created ASC");
+    }
+
+    public static void buscarDadosIncidentes(String query) {
+        JsonNodeFactory jnf = JsonNodeFactory.instance;
+        ObjectNode payload = jnf.objectNode();
+        {
+            ArrayNode fields = payload.putArray("fields");
+            fields.add("created");
+            payload.put("fieldsByKeys", true);
+            payload.put("jql", query);
+            payload.put("maxResults", 20);
+        }
+
+        Unirest.config().setObjectMapper(new kong.unirest.ObjectMapper() {
+            private com.fasterxml.jackson.databind.ObjectMapper jacksonObjectMapper
+                    = new com.fasterxml.jackson.databind.ObjectMapper();
+
+            public <T> T readValue(String value, Class<T> valueType) {
+                try {
+                    return jacksonObjectMapper.readValue(value, valueType);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            public String writeValue(Object value) {
+                try {
+                    return jacksonObjectMapper.writeValueAsString(value);
+                } catch (JsonProcessingException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        });
+
+        HttpResponse<JsonNode> response = Unirest.post("https://sptech-team-lpyjf1yr.atlassian.net/rest/api/3/search/jql")
+                .basicAuth("monitora373@gmail.com", "")
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/json")
+                .body(payload)
+                .asJson();
+
+        System.out.println(response.getBody());
     }
 
     public static int fazerConsultaContador(String query) {
