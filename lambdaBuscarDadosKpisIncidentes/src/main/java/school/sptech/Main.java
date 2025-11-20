@@ -14,6 +14,9 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.amazonaws.services.lambda.runtime.Context;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+
 public class Main implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2HTTPResponse>{
     @Override
     public APIGatewayV2HTTPResponse handleRequest(APIGatewayV2HTTPEvent event, Context context) {
@@ -82,11 +85,42 @@ public class Main implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2H
     public static ObjectNode buscarDadosKpisIncidentes(String apiToken) {
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode dadosKpisIncidentes = mapper.createObjectNode();
-        dadosKpisIncidentes.put("totais", fazerConsultaContador("project = MONA AND created <= \"30d\"", apiToken));
-        dadosKpisIncidentes.put("abertos", fazerConsultaContador("project = MONA AND status in (open, 'in progress') AND created <= \"30d\"", apiToken));
-        dadosKpisIncidentes.put("fechados", fazerConsultaContador("project = MONA AND status in (completed, canceled, closed) AND created <= \"30d\"", apiToken));
-        dadosKpisIncidentes.put("atencao", fazerConsultaContador("project = MONA AND summary ~ 'ATENÇÃO' AND created <= \"30d\"", apiToken));
-        dadosKpisIncidentes.put("criticos", fazerConsultaContador("project = MONA AND summary ~ 'ALERTA CRÍTICO' AND created <= \"30d\"", apiToken));
+
+        //Dispara todas as requisições em paralelo (sem esperar a resposta ainda)
+        CompletableFuture<Integer> futuroTotais = CompletableFuture.supplyAsync(() ->
+                fazerConsultaContador("project = MONA AND created <= \"30d\"", apiToken)
+        );
+
+        CompletableFuture<Integer> futuroAbertos = CompletableFuture.supplyAsync(() ->
+                fazerConsultaContador("project = MONA AND status in (Open, 'In Progress') AND created <= \"30d\"", apiToken)
+        );
+
+        CompletableFuture<Integer> futuroFechados = CompletableFuture.supplyAsync(() ->
+                fazerConsultaContador("project = MONA AND status in (Completed, Canceled, Closed) AND created <= \"30d\"", apiToken)
+        );
+
+        CompletableFuture<Integer> futuroAtencao = CompletableFuture.supplyAsync(() ->
+                fazerConsultaContador("project = MONA AND summary ~ 'ATENÇÃO' AND created <= \"30d\"", apiToken)
+        );
+
+        CompletableFuture<Integer> futuroCriticos = CompletableFuture.supplyAsync(() ->
+                fazerConsultaContador("project = MONA AND summary ~ 'ALERTA CRÍTICO' AND created <= \"30d\"", apiToken)
+        );
+
+        // Aguarda até que todas as consultas terminem (Até que as respostas de todas chegue
+        CompletableFuture.allOf(futuroTotais, futuroAbertos, futuroFechados, futuroAtencao, futuroCriticos).join();
+
+        try {
+            // Coleta os resultados das consultas e montar o JSON
+            dadosKpisIncidentes.put("totais", futuroTotais.get());
+            dadosKpisIncidentes.put("abertos", futuroAbertos.get());
+            dadosKpisIncidentes.put("fechados", futuroFechados.get());
+            dadosKpisIncidentes.put("atencao", futuroAtencao.get());
+            dadosKpisIncidentes.put("criticos", futuroCriticos.get());
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException("Erro ao processar consultas assíncronas: " + e.getMessage(), e);
+        }
+
         return dadosKpisIncidentes;
     }
 }
