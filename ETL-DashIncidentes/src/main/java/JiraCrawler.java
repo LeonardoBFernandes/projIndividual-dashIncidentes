@@ -20,7 +20,8 @@ public class JiraCrawler {
         //System.out.println(buscarDadosKpisIncidentes());
         //System.out.println(buscarDadosRankingComponentes());
         //System.out.println(calcularMTBF());
-        System.out.println(calcularMTTR());
+        //System.out.println(calcularMTTR());
+        System.out.println(calcularSlaCompliance());
     }
 
     public static ObjectNode buscarDadosIncidentes(String query, String field) throws JsonProcessingException {
@@ -253,6 +254,21 @@ public class JiraCrawler {
 
         ObjectNode result = mapper.createObjectNode();
         result.put("MTTR", horas + "h" + minutos + "min");
+
+        return result;
+    }
+
+    public static ObjectNode calcularSlaCompliance() {
+        ObjectMapper mapper = new ObjectMapper();
+        int incidentesTotais = fazerConsultaContador("project = MONA AND status = Completed AND created <= 30d");
+        int incidentesResolvidosDentroDoTempo = fazerConsultaContador("project = MONA AND status = Completed AND " +
+                "created <= 30d AND \"Time to resolution\" = completed() AND \"Time to resolution\" != everBreached()");
+
+        double porcentagemSla = (incidentesResolvidosDentroDoTempo * 100) / incidentesTotais;
+        double porcentagemArredondada = Math.round(porcentagemSla * 10) / 10;
+
+        ObjectNode result = mapper.createObjectNode();
+        result.put("porcentagemSLA", porcentagemArredondada + "%");
 
         return result;
     }
