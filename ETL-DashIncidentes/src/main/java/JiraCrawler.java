@@ -19,15 +19,16 @@ public class JiraCrawler {
     public static void main(String[] args) throws JsonProcessingException {
         //System.out.println(buscarDadosKpisIncidentes());
         //System.out.println(buscarDadosRankingComponentes());
-        System.out.println(calcularMTBF());
+        //System.out.println(calcularMTBF());
+        System.out.println(calcularMTTR());
     }
 
-    public static ObjectNode buscarDadosIncidentes(String query) throws JsonProcessingException {
+    public static ObjectNode buscarDadosIncidentes(String query, String field) throws JsonProcessingException {
         JsonNodeFactory jnf = JsonNodeFactory.instance;
         ObjectNode payload = jnf.objectNode();
         {
             ArrayNode fields = payload.putArray("fields");
-            fields.add("created");
+            fields.add(field);
             payload.put("fieldsByKeys", true);
             payload.put("jql", query);
             payload.put("maxResults", 20);
@@ -175,7 +176,7 @@ public class JiraCrawler {
         List<ZonedDateTime> datas = new ArrayList<>();
         ObjectNode incidentesArray = null;
         try {
-            incidentesArray = buscarDadosIncidentes("project = MONA AND created <= 30d ORDER BY created ASC");
+            incidentesArray = buscarDadosIncidentes("project = MONA AND created <= 30d ORDER BY created ASC", "created");
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
@@ -209,5 +210,50 @@ public class JiraCrawler {
         json.put("MTBF", horas + "h" + minutos + "min");
 
         return json;
+    }
+
+    public static ObjectNode calcularMTTR() {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode incidentesArray = null;
+        List<Long> temposDeResolucao = new ArrayList<>();
+
+        try {
+            incidentesArray = buscarDadosIncidentes("project = MONA AND status = Completed AND created <= 30d ORDER BY \"Time to resolution\" ASC", "customfield_10092");
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+
+        com.fasterxml.jackson.databind.JsonNode issuesArray = incidentesArray.path("issues");
+
+        for (com.fasterxml.jackson.databind.JsonNode issue : issuesArray) {
+            // Acessa o campo de SLA (Time to resolution)
+            com.fasterxml.jackson.databind.JsonNode slaField = issue.path("fields").path("customfield_10092");
+            com.fasterxml.jackson.databind.JsonNode cycles = slaField.path("completedCycles");
+            if (cycles.size() > 0) {
+                // PEGA O ÚLTIMO CICLO (Geralmente o válido para a resolução final)
+                com.fasterxml.jackson.databind.JsonNode lastCycle = cycles.get(cycles.size() - 1);
+                // Pega o valor em Milissegundos
+                long millis = lastCycle.path("elapsedTime").path("millis").asLong();
+
+                // Evita adicionar 0 se algo estiver errado
+                if (millis > 0) {
+                    temposDeResolucao.add(millis);
+                }
+            }
+        }
+
+        double mediaMillis = temposDeResolucao.stream()
+                .mapToLong(Long::longValue)
+                .average()
+                .orElse(0);
+
+        Duration mttr = Duration.ofMillis((long) mediaMillis);
+        long horas = mttr.toHours();
+        long minutos = mttr.toMinutesPart();
+
+        ObjectNode result = mapper.createObjectNode();
+        result.put("MTTR", horas + "h" + minutos + "min");
+
+        return result;
     }
 }
