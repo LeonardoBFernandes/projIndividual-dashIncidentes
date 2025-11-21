@@ -195,7 +195,8 @@ public class Main implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2H
         long minutos = (long) (mtbfMinutos % 60);
 
         ObjectNode json = mapper.createObjectNode();
-        json.put("MTBF", horas + "h" + minutos + "min");
+        json.put("MTBFhoras", horas);
+        json.put("MTBFminutos", minutos);
 
         return json;
     }
@@ -240,7 +241,8 @@ public class Main implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2H
         long minutos = mttr.toMinutesPart();
 
         ObjectNode result = mapper.createObjectNode();
-        result.put("MTTR", horas + "h" + minutos + "min");
+        result.put("MTTRhoras", horas);
+        result.put("MTTRminutos", minutos);
 
         return result;
     }
@@ -255,7 +257,7 @@ public class Main implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2H
         double porcentagemArredondada = Math.round(porcentagemSla * 10) / 10;
 
         ObjectNode result = mapper.createObjectNode();
-        result.put("porcentagemSLA", porcentagemArredondada + "%");
+        result.put("porcentagemSLA", porcentagemArredondada);
 
         return result;
     }
