@@ -99,24 +99,34 @@ public class Main implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2H
                 fazerConsultaContador("project = MONA AND status in (Completed, Canceled, Closed) AND created <= \"30d\"", apiToken)
         );
 
-        CompletableFuture<Integer> futuroAtencao = CompletableFuture.supplyAsync(() ->
+        CompletableFuture<Integer> futuroAtencaoAbertos = CompletableFuture.supplyAsync(() ->
+                fazerConsultaContador("project = MONA AND summary ~ 'ATENÇÃO' AND created <= \"30d\" AND status = Open", apiToken)
+        );
+
+        CompletableFuture<Integer> futuroAtencaoTotais = CompletableFuture.supplyAsync(() ->
                 fazerConsultaContador("project = MONA AND summary ~ 'ATENÇÃO' AND created <= \"30d\"", apiToken)
         );
 
-        CompletableFuture<Integer> futuroCriticos = CompletableFuture.supplyAsync(() ->
+        CompletableFuture<Integer> futuroCriticosAbertos = CompletableFuture.supplyAsync(() ->
+                fazerConsultaContador("project = MONA AND summary ~ 'ALERTA CRÍTICO' AND created <= \"30d\" AND status = Open", apiToken)
+        );
+
+        CompletableFuture<Integer> futuroCriticosTotais = CompletableFuture.supplyAsync(() ->
                 fazerConsultaContador("project = MONA AND summary ~ 'ALERTA CRÍTICO' AND created <= \"30d\"", apiToken)
         );
 
         // Aguarda até que todas as consultas terminem (Até que as respostas de todas chegue
-        CompletableFuture.allOf(futuroTotais, futuroAbertos, futuroFechados, futuroAtencao, futuroCriticos).join();
+        CompletableFuture.allOf(futuroTotais, futuroAbertos, futuroFechados, futuroAtencaoAbertos, futuroAtencaoTotais, futuroCriticosAbertos, futuroCriticosTotais).join();
 
         try {
             // Coleta os resultados das consultas e montar o JSON
             dadosKpisIncidentes.put("totais", futuroTotais.get());
             dadosKpisIncidentes.put("abertos", futuroAbertos.get());
             dadosKpisIncidentes.put("fechados", futuroFechados.get());
-            dadosKpisIncidentes.put("atencao", futuroAtencao.get());
-            dadosKpisIncidentes.put("criticos", futuroCriticos.get());
+            dadosKpisIncidentes.put("atencaoAbertos", futuroAtencaoAbertos.get());
+            dadosKpisIncidentes.put("atencaoTotais", futuroAtencaoTotais.get());
+            dadosKpisIncidentes.put("criticosAbertos", futuroCriticosAbertos.get());
+            dadosKpisIncidentes.put("criticosTotais", futuroCriticosTotais.get());
         } catch (InterruptedException | ExecutionException e) {
             throw new RuntimeException("Erro ao processar consultas assíncronas: " + e.getMessage(), e);
         }
