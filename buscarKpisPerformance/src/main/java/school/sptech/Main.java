@@ -203,46 +203,59 @@ public class Main implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2H
 
     public static ObjectNode calcularMTTR(String apiToken) {
         ObjectMapper mapper = new ObjectMapper();
-        ObjectNode incidentesArray = null;
+        ObjectNode incidentesArrayCriticos = null;
+        ObjectNode incidentesArrayAtencao = null;
         List<Long> temposDeResolucao = new ArrayList<>();
+        List<Long> temposMTTR = new ArrayList<>();
 
         try {
-            incidentesArray = buscarDadosIncidentes("project = MONA AND status = Completed AND created <= 30d ORDER BY \"Time to resolution\" ASC", "customfield_10092", apiToken);
+            incidentesArrayCriticos = buscarDadosIncidentes("project = MONA AND status = Completed AND priority = Highest AND created <= 30d ORDER BY \"Time to resolution\" ASC", "customfield_10092", apiToken);
+            incidentesArrayAtencao = buscarDadosIncidentes("project = MONA AND status = Completed AND priority = High AND created <= 30d ORDER BY \"Time to resolution\" ASC", "customfield_10092", apiToken);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
 
-        com.fasterxml.jackson.databind.JsonNode issuesArray = incidentesArray.path("issues");
+        ObjectNode jsonsBusca[] = {incidentesArrayCriticos, incidentesArrayAtencao};
 
-        for (com.fasterxml.jackson.databind.JsonNode issue : issuesArray) {
-            // Acessa o campo de SLA (Time to resolution)
-            com.fasterxml.jackson.databind.JsonNode slaField = issue.path("fields").path("customfield_10092");
-            com.fasterxml.jackson.databind.JsonNode cycles = slaField.path("completedCycles");
-            if (cycles.size() > 0) {
-                // PEGA O ÚLTIMO CICLO (Geralmente o válido para a resolução final)
-                com.fasterxml.jackson.databind.JsonNode lastCycle = cycles.get(cycles.size() - 1);
-                // Pega o valor em Milissegundos
-                long millis = lastCycle.path("elapsedTime").path("millis").asLong();
+        for (ObjectNode json : jsonsBusca) {
+            com.fasterxml.jackson.databind.JsonNode issuesArray1 = json.path("issues");
 
-                // Evita adicionar 0 se algo estiver errado
-                if (millis > 0) {
-                    temposDeResolucao.add(millis);
+            for (com.fasterxml.jackson.databind.JsonNode issue : issuesArray1) {
+                // Acessa o campo de SLA (Time to resolution)
+                com.fasterxml.jackson.databind.JsonNode slaField = issue.path("fields").path("customfield_10092");
+                com.fasterxml.jackson.databind.JsonNode cycles = slaField.path("completedCycles");
+                if (cycles.size() > 0) {
+                    // PEGA O ÚLTIMO CICLO (Geralmente o válido para a resolução final)
+                    com.fasterxml.jackson.databind.JsonNode lastCycle = cycles.get(cycles.size() - 1);
+                    // Pega o valor em Milissegundos
+                    long millis = lastCycle.path("elapsedTime").path("millis").asLong();
+
+                    // Evita adicionar 0 se algo estiver errado
+                    if (millis > 0) {
+                        temposDeResolucao.add(millis);
+                    }
                 }
             }
+
+            double mediaMillis = temposDeResolucao.stream()
+                    .mapToLong(Long::longValue)
+                    .average()
+                    .orElse(0);
+
+            Duration mttr = Duration.ofMillis((long) mediaMillis);
+            long horas = mttr.toHours();
+            long minutos = mttr.toMinutesPart();
+
+            temposMTTR.add(horas);
+            temposMTTR.add(minutos);
         }
 
-        double mediaMillis = temposDeResolucao.stream()
-                .mapToLong(Long::longValue)
-                .average()
-                .orElse(0);
-
-        Duration mttr = Duration.ofMillis((long) mediaMillis);
-        long horas = mttr.toHours();
-        long minutos = mttr.toMinutesPart();
+        String nomesJsonFinal[] = {"MTTRCriticosHoras", "MTTRCriticosMinutos", "MTTRAtencaoHoras", "MTTRAtencaoMinutos"};
 
         ObjectNode result = mapper.createObjectNode();
-        result.put("MTTRhoras", horas);
-        result.put("MTTRminutos", minutos);
+        for (int i = 0; i < temposMTTR.size(); i++) {
+            result.put(nomesJsonFinal[i], temposMTTR.get(i));
+        }
 
         return result;
     }
