@@ -16,6 +16,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.amazonaws.services.lambda.runtime.Context;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -111,15 +112,17 @@ public class Main implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2H
         return response.getBody().getObject().getInt("count");
     }
 
-    public static ObjectNode buscarDadosIncidentes(String query, String field, String apiToken) throws JsonProcessingException {
+    public static ObjectNode buscarDadosIncidentes(String query, String[] fieldsRequest, int maxResults, String apiToken) throws JsonProcessingException {
         JsonNodeFactory jnf = JsonNodeFactory.instance;
         ObjectNode payload = jnf.objectNode();
         {
             ArrayNode fields = payload.putArray("fields");
-            fields.add(field);
+            for (String field:fieldsRequest) {
+                fields.add(field);
+            }
             payload.put("fieldsByKeys", true);
             payload.put("jql", query);
-            payload.put("maxResults", 20);
+            payload.put("maxResults", maxResults);
         }
 
         Unirest.config().setObjectMapper(new kong.unirest.ObjectMapper() {
@@ -163,8 +166,9 @@ public class Main implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2H
         ObjectMapper mapper = new ObjectMapper();
         List<ZonedDateTime> datas = new ArrayList<>();
         ObjectNode incidentesArray = null;
+        String[] fields = {"created"};
         try {
-            incidentesArray = buscarDadosIncidentes("project = MONA AND created <= 30d ORDER BY created ASC", "created", apiToken);
+            incidentesArray = buscarDadosIncidentes("project = MONA AND created <= 30d ORDER BY created ASC", fields, 30, apiToken);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
@@ -205,66 +209,119 @@ public class Main implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2H
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode incidentesArrayCriticos = null;
         ObjectNode incidentesArrayAtencao = null;
-        List<Long> temposDeResolucao = new ArrayList<>();
-        List<Long> temposMTTR = new ArrayList<>();
+
+        // Solicitamos explicitamente os campos created e resolutiondate
+        String[] fields = {"created", "resolutiondate"};
+
+        CompletableFuture<ObjectNode> futuroDadosIncidentesCriticos = CompletableFuture.supplyAsync(() ->
+                {
+                    try {
+                        return buscarDadosIncidentes(
+                                "project = MONA AND status = Completed AND priority = Highest AND created <= 30d",
+                                fields,
+                                30,
+                                apiToken);
+                    } catch (JsonProcessingException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+        );
+
+        CompletableFuture<ObjectNode> futuroDadosIncidentesAtencao = CompletableFuture.supplyAsync(() ->
+                {
+                    try {
+                        return buscarDadosIncidentes(
+                                "project = MONA AND status = Completed AND priority = High AND created <= 30d",
+                                fields,
+                                30,
+                                apiToken);
+                    } catch (JsonProcessingException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+        );
+
+        CompletableFuture.allOf(futuroDadosIncidentesCriticos, futuroDadosIncidentesAtencao).join();
 
         try {
-            incidentesArrayCriticos = buscarDadosIncidentes("project = MONA AND status = Completed AND priority = Highest AND created <= 30d ORDER BY \"Time to resolution\" ASC", "customfield_10092", apiToken);
-            incidentesArrayAtencao = buscarDadosIncidentes("project = MONA AND status = Completed AND priority = High AND created <= 30d ORDER BY \"Time to resolution\" ASC", "customfield_10092", apiToken);
-        } catch (JsonProcessingException e) {
+            incidentesArrayCriticos = futuroDadosIncidentesCriticos.get();
+            incidentesArrayAtencao = futuroDadosIncidentesAtencao.get();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } catch (ExecutionException e) {
             throw new RuntimeException(e);
         }
 
-        ObjectNode jsonsBusca[] = {incidentesArrayCriticos, incidentesArrayAtencao};
-
-        for (ObjectNode json : jsonsBusca) {
-            com.fasterxml.jackson.databind.JsonNode issuesArray1 = json.path("issues");
-
-            for (com.fasterxml.jackson.databind.JsonNode issue : issuesArray1) {
-                // Acessa o campo de SLA (Time to resolution)
-                com.fasterxml.jackson.databind.JsonNode slaField = issue.path("fields").path("customfield_10092");
-                com.fasterxml.jackson.databind.JsonNode cycles = slaField.path("completedCycles");
-                if (cycles.size() > 0) {
-                    // PEGA O ÚLTIMO CICLO (Geralmente o válido para a resolução final)
-                    com.fasterxml.jackson.databind.JsonNode lastCycle = cycles.get(cycles.size() - 1);
-                    // Pega o valor em Milissegundos
-                    long millis = lastCycle.path("elapsedTime").path("millis").asLong();
-
-                    // Evita adicionar 0 se algo estiver errado
-                    if (millis > 0) {
-                        temposDeResolucao.add(millis);
-                    }
-                }
-            }
-
-            double mediaMillis = temposDeResolucao.stream()
-                    .mapToLong(Long::longValue)
-                    .average()
-                    .orElse(0);
-
-            Duration mttr = Duration.ofMillis((long) mediaMillis);
-            long horas = mttr.toHours();
-            long minutos = mttr.toMinutesPart();
-
-            temposMTTR.add(horas);
-            temposMTTR.add(minutos);
-        }
-
-        String nomesJsonFinal[] = {"MTTRCriticosHoras", "MTTRCriticosMinutos", "MTTRAtencaoHoras", "MTTRAtencaoMinutos"};
-
         ObjectNode result = mapper.createObjectNode();
-        for (int i = 0; i < temposMTTR.size(); i++) {
-            result.put(nomesJsonFinal[i], temposMTTR.get(i));
-        }
+
+        // Calculamos separadamente para garantir que as listas não se misturem
+        Duration mttrCriticos = calcularMediaPorGrupo(incidentesArrayCriticos);
+        Duration mttrAtencao = calcularMediaPorGrupo(incidentesArrayAtencao);
+
+        // Popula o JSON de resposta
+        result.put("MTTRCriticosHoras", mttrCriticos.toHours());
+        result.put("MTTRCriticosMinutos", mttrCriticos.toMinutesPart()); // Minutos restantes após as horas
+
+        result.put("MTTRAtencaoHoras", mttrAtencao.toHours());
+        result.put("MTTRAtencaoMinutos", mttrAtencao.toMinutesPart());
 
         return result;
+    }
+
+    // Método auxiliar para evitar repetição de código e manter a lógica limpa
+    private static Duration calcularMediaPorGrupo(ObjectNode json) {
+        List<Long> temposDeResolucao = new ArrayList<>();
+        com.fasterxml.jackson.databind.JsonNode issuesArray = json.path("issues");
+
+        // Formatter para ler o padrão do Jira (ex: 2023-10-25T14:30:00.000-0300)
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
+
+        for (com.fasterxml.jackson.databind.JsonNode issue : issuesArray) {
+            com.fasterxml.jackson.databind.JsonNode fields = issue.path("fields");
+
+            String createdStr = fields.path("created").asText(null);
+            String resolutionStr = fields.path("resolutiondate").asText(null);
+
+            if (createdStr != null && resolutionStr != null) {
+                try {
+                    // Converte as Strings do Jira para Objetos de Data
+                    OffsetDateTime created = OffsetDateTime.parse(createdStr, formatter);
+                    OffsetDateTime resolution = OffsetDateTime.parse(resolutionStr, formatter);
+
+                    // Calcula a duração entre Criado e Resolvido
+                    Duration duration = Duration.between(created, resolution);
+
+                    // Salva em milissegundos para fazer a média depois
+                    temposDeResolucao.add(duration.toMillis());
+                } catch (Exception e) {
+                    // Logar erro de parse se necessário, ou ignorar issue malformada
+                    System.err.println("Erro ao processar datas da issue: " + e.getMessage());
+                }
+            }
+        }
+
+        // Calcula a média
+        double mediaMillis = temposDeResolucao.stream()
+                .mapToLong(Long::longValue)
+                .average()
+                .orElse(0);
+
+        return Duration.ofMillis((long) mediaMillis);
     }
 
     public static ObjectNode calcularSlaCompliance(String apiToken) {
         ObjectMapper mapper = new ObjectMapper();
         int incidentesTotais = fazerConsultaContador("project = MONA AND status = Completed AND created <= 30d", apiToken);
-        int incidentesResolvidosDentroDoTempo = fazerConsultaContador("project = MONA AND status = Completed AND " +
-                "created <= 30d AND \"Time to resolution\" = completed() AND \"Time to resolution\" != everBreached()", apiToken);
+        ObjectNode dadosIncidentes = null;
+        String[] fields = {"created", "resolutiondate", "priority"};
+
+        try {
+            dadosIncidentes = buscarDadosIncidentes("project = MONA AND status = Completed AND created <= 30d", fields, 5000, apiToken);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+
+        int incidentesResolvidosDentroDoTempo = contagemIncidentesResolvidosNoTempo(dadosIncidentes);
 
         double porcentagemSla = (incidentesResolvidosDentroDoTempo * 100) / incidentesTotais;
         double porcentagemArredondada = Math.round(porcentagemSla * 10) / 10;
@@ -273,5 +330,40 @@ public class Main implements RequestHandler<APIGatewayV2HTTPEvent, APIGatewayV2H
         result.put("porcentagemSLA", porcentagemArredondada);
 
         return result;
+    }
+
+    public static int contagemIncidentesResolvidosNoTempo(ObjectNode dadosIncidentes) {
+        int contador = 0;
+        com.fasterxml.jackson.databind.JsonNode issuesArray = dadosIncidentes.path("issues");
+
+        // Formatter para ler o padrão do Jira (ex: 2023-10-25T14:30:00.000-0300)
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
+        Duration limiteCritico = Duration.ofHours(12);
+        Duration limiteAtencao = Duration.ofHours(24);
+
+        for (com.fasterxml.jackson.databind.JsonNode issue : issuesArray) {
+            com.fasterxml.jackson.databind.JsonNode fields = issue.path("fields");
+
+            String createdStr = fields.path("created").asText(null);
+            String resolutionStr = fields.path("resolutiondate").asText(null);
+            String priorityStr = fields.path("priority").path("name").asText(null);
+            System.out.println(priorityStr);
+
+            OffsetDateTime created = OffsetDateTime.parse(createdStr, formatter);
+            OffsetDateTime resolution = OffsetDateTime.parse(resolutionStr, formatter);
+            Duration duration = Duration.between(created, resolution);
+
+            // O compareTo retorna:
+            //  1 (ou > 0) se diferenca for MAIOR que limite
+            //  0 se forem IGUAIS
+            // -1 (ou < 0) se diferenca for MENOR que limite
+            if (priorityStr.equalsIgnoreCase("highest") && duration.compareTo(limiteCritico) <= 0) {
+                contador++;
+            } else if (priorityStr.equalsIgnoreCase("high") && duration.compareTo(limiteAtencao) <= 0) {
+                contador++;
+            }
+        }
+
+        return contador;
     }
 }
