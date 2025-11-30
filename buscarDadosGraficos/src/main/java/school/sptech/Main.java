@@ -30,7 +30,7 @@ public class Main implements RequestHandler<Map<String, Object>, String>{
         final S3Client s3Client = S3Client.builder().build();
         try {
             String apiToken = System.getenv("JIRA_API_TOKEN");
-            String BUCKET_NAME = System.getenv().getOrDefault("CLIENT_BUCKET", "teste-123-monitora");
+            String BUCKET_NAME = System.getenv().getOrDefault("CLIENT_BUCKET", "monitora_client");
             String fileName = "dados-" + Instant.now().toString() + ".json";
 
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy/MM/dd/")
