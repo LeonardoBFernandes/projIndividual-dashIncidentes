@@ -21,6 +21,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,25 +39,33 @@ public class Main implements RequestHandler<Map<String, Object>, String>{
 
             String DIRECTORY_PATH = "dadosGraficoIncidentes" + "/" + formatter.format(Instant.now());
 
-            String objectKey = DIRECTORY_PATH + fileName;
+            String objectKeyRegistroHistorico = DIRECTORY_PATH + fileName;
 
             // Garantir que não haja barras duplas acidentais (opcional, mas recomendado)
             // Se DIRECTORY_PATH não terminar com '/', você deve adicionar manualmente.
             if (!DIRECTORY_PATH.isEmpty() && !DIRECTORY_PATH.endsWith("/")) {
-                objectKey = "dadosGraficoIncidentes" + "/" + DIRECTORY_PATH + "/" + fileName;
+                objectKeyRegistroHistorico = "dadosGraficoIncidentes" + "/" + DIRECTORY_PATH + "/" + fileName;
             }
 
             String json = formatarParaJSON(apiToken);
 
-            PutObjectRequest putOb = PutObjectRequest.builder()
+            PutObjectRequest putObRegistroHistorico = PutObjectRequest.builder()
                     .bucket(BUCKET_NAME)
-                    .key(objectKey)
+                    .key(objectKeyRegistroHistorico)
                     .contentType("application/json")
                     .build();
 
-            s3Client.putObject(putOb, RequestBody.fromString(json, StandardCharsets.UTF_8));
+            s3Client.putObject(putObRegistroHistorico, RequestBody.fromString(json, StandardCharsets.UTF_8));
 
-            return "Arquivo salvo em: " + objectKey;
+            PutObjectRequest putObRegistroLatest = PutObjectRequest.builder()
+                    .bucket(BUCKET_NAME)
+                    .key("dadosGraficoIncidentes/latest.json")
+                    .contentType("application/json")
+                    .build();
+
+            s3Client.putObject(putObRegistroLatest, RequestBody.fromString(json, StandardCharsets.UTF_8));
+
+            return "Arquivo salvo em: " + objectKeyRegistroHistorico;
 
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -65,15 +74,15 @@ public class Main implements RequestHandler<Map<String, Object>, String>{
 
     public static String formatarParaJSON(String apiToken) {
         ObjectMapper mapper = new ObjectMapper();
-        ObjectNode dados = mapper.createObjectNode();
+        Map<String, Object> dados = new HashMap<>();
 
-        List<String> datas = buscarListaDatas(apiToken);
+        List<String> datas = buscarListaDatas();
         List<Integer> dadosIncidentesAbertos = buscarDadosIncidentesAbertos(apiToken);
         List<Integer> dadosIncidentesFechados = buscarDadosIncidentesFechados(apiToken);
 
-        dados.put("datas", String.valueOf(datas));
-        dados.put("incidentesAbertos", String.valueOf(dadosIncidentesAbertos));
-        dados.put("incidentesFechados", String.valueOf(dadosIncidentesFechados));
+        dados.put("datas", datas);
+        dados.put("incidentesAbertos", dadosIncidentesAbertos);
+        dados.put("incidentesFechados", dadosIncidentesFechados);
 
         String dadosFormatados = null;
         try {
@@ -85,7 +94,7 @@ public class Main implements RequestHandler<Map<String, Object>, String>{
         return dadosFormatados;
     }
 
-    public static List<String> buscarListaDatas(String apiToken) {
+    public static List<String> buscarListaDatas() {
         List<String> datas = new ArrayList<>();
         DateTimeFormatter formatterJSON = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
