@@ -79,10 +79,20 @@ public class Main implements RequestHandler<Map<String, Object>, String>{
         List<String> datas = buscarListaDatas();
         List<Integer> dadosIncidentesAbertos = buscarDadosIncidentesAbertos(apiToken);
         List<Integer> dadosIncidentesFechados = buscarDadosIncidentesFechados(apiToken);
+        List<Integer> incidentesAbertosRAM = buscarDadosIncidentesRAM(apiToken);
+        List<Integer> incidentesAbertosCPU = buscarDadosIncidentesCPU(apiToken);
+        List<Integer> incidentesAbertosDisco = buscarDadosIncidentesDisco(apiToken);
+        List<Integer> incidentesAbertosLatencia = buscarDadosIncidentesLatencia(apiToken);
+        List<Integer> incidentesAbertosUsoRede = buscarDadosIncidentesUsoRede(apiToken);
 
         dados.put("datas", datas);
         dados.put("incidentesAbertos", dadosIncidentesAbertos);
         dados.put("incidentesFechados", dadosIncidentesFechados);
+        dados.put("incidentesAbertosRAM", incidentesAbertosRAM);
+        dados.put("incidentesAbertosCPU", incidentesAbertosCPU);
+        dados.put("incidentesAbertosDisco", incidentesAbertosDisco);
+        dados.put("incidentesAbertosLatencia", incidentesAbertosLatencia);
+        dados.put("incidentesAbertosUsoRede", incidentesAbertosUsoRede);
 
         String dadosFormatados = null;
         try {
@@ -136,6 +146,81 @@ public class Main implements RequestHandler<Map<String, Object>, String>{
         }
 
         return incidentesFechados;
+    }
+
+    public static List<Integer> buscarDadosIncidentesRAM(String apiToken) {
+        List<Integer> incidentesAbertosRAM = new ArrayList<>();
+        DateTimeFormatter formatterJira = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+        LocalDate dataAtual = LocalDate.now();
+
+        for (int i = 0; i < 30; i++) {
+            LocalDate dataAPesquisar = dataAtual.minusDays(i);
+            LocalDate dataMaior = dataAPesquisar.plusDays(1);
+            incidentesAbertosRAM.add(fazerConsultaContador("project = MONA AND \"Affected hardware\" ~ 'Memória RAM' AND created >= "+ dataAPesquisar.format(formatterJira) +" AND created < " + dataMaior.format(formatterJira), apiToken));
+        }
+
+        return incidentesAbertosRAM;
+    }
+
+        public static List<Integer> buscarDadosIncidentesCPU(String apiToken) {
+            List<Integer> incidentesAbertosCPU = new ArrayList<>();
+            DateTimeFormatter formatterJira = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+            LocalDate dataAtual = LocalDate.now();
+
+            for (int i = 0; i < 30; i++) {
+                LocalDate dataAPesquisar = dataAtual.minusDays(i);
+                LocalDate dataMaior = dataAPesquisar.plusDays(1);
+                incidentesAbertosCPU.add(fazerConsultaContador("project = MONA AND \"Affected hardware\" ~ 'CPU' AND created >= "+ dataAPesquisar.format(formatterJira) +" AND created < " + dataMaior.format(formatterJira), apiToken));
+            }
+
+            return incidentesAbertosCPU;
+    }
+
+    public static List<Integer> buscarDadosIncidentesDisco(String apiToken) {
+        List<Integer> incidentesAbertosDisco = new ArrayList<>();
+        DateTimeFormatter formatterJira = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+        LocalDate dataAtual = LocalDate.now();
+
+        for (int i = 0; i < 30; i++) {
+            LocalDate dataAPesquisar = dataAtual.minusDays(i);
+            LocalDate dataMaior = dataAPesquisar.plusDays(1);
+            incidentesAbertosDisco.add(fazerConsultaContador("project = MONA AND \"Affected hardware\" ~ 'Disco' AND created >= "+ dataAPesquisar.format(formatterJira) +" AND created < " + dataMaior.format(formatterJira), apiToken));
+        }
+
+        return incidentesAbertosDisco;
+    }
+
+    public static List<Integer> buscarDadosIncidentesLatencia(String apiToken) {
+        List<Integer> incidentesAbertosLatencia = new ArrayList<>();
+        DateTimeFormatter formatterJira = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+        LocalDate dataAtual = LocalDate.now();
+
+        for (int i = 0; i < 30; i++) {
+            LocalDate dataAPesquisar = dataAtual.minusDays(i);
+            LocalDate dataMaior = dataAPesquisar.plusDays(1);
+            incidentesAbertosLatencia.add(fazerConsultaContador("project = MONA AND \"Affected hardware\" ~ 'Latência' AND created >= "+ dataAPesquisar.format(formatterJira) +" AND created < " + dataMaior.format(formatterJira), apiToken));
+        }
+
+        return incidentesAbertosLatencia;
+    }
+
+    public static List<Integer> buscarDadosIncidentesUsoRede(String apiToken) {
+        List<Integer> incidentesAbertosUsoRede = new ArrayList<>();
+        DateTimeFormatter formatterJira = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+        LocalDate dataAtual = LocalDate.now();
+
+        for (int i = 0; i < 30; i++) {
+            LocalDate dataAPesquisar = dataAtual.minusDays(i);
+            LocalDate dataMaior = dataAPesquisar.plusDays(1);
+            incidentesAbertosUsoRede.add(fazerConsultaContador("project = MONA AND \"Affected hardware\" ~ 'Uso de Rede' AND created >= "+ dataAPesquisar.format(formatterJira) +" AND created < " + dataMaior.format(formatterJira), apiToken));
+        }
+
+        return incidentesAbertosUsoRede;
     }
 
     public static int fazerConsultaContador(String query, String apiToken) {
